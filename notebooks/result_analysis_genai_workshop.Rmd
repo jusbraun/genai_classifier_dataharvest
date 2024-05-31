@@ -1,0 +1,83 @@
+---
+title: "validation_genai"
+author: "Justin Braun"
+date: "2024-05-30"
+output: html_document
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = '/Users/justin-casimirbraun/GitHub/genai_classifier_dataharvest/notebooks')
+```
+
+## Load libraries
+
+```{r}
+#load libraries
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+```
+
+## Load Data
+```{r}
+test_set_classified <- read.csv('../data/test_set_classified.csv')
+```
+
+## Process data
+```{r}
+# convert classifications to lower case and calculate matches with hand coding
+test_set_classified <- test_set_classified %>%
+  rowwise() %>%
+  mutate(hand_coded = tolower(hand_coded),
+         llama = tolower(llama),
+         gpt35 = tolower(gpt35),
+         llama_match = ifelse(grepl(llama, hand_coded, fixed = T), 1, 0),
+         gpt_match = ifelse(grepl(gpt35, hand_coded, fixed = T), 1, 0),
+         both_match = ifelse(llama_match + gpt_match == 2, 1, 0))
+```
+
+## Calculate Performance Metrics
+
+```{r}
+# over all accuracy
+accuracy_overall <- test_set_classified %>%
+  group_by()%>%
+  summarise(llama = mean(llama_match, na.rm = T),
+            gpt = mean(gpt_match, na.rm = T),
+            both = mean(both_match, na.rm = T)) %>%
+  mutate(type = "all")
+
+# accuracy broken down by aggaravating and mitigating circumstances
+accuracy_type <- test_set_classified %>%
+  group_by(type)%>%
+  summarise(llama = mean(llama_match, na.rm = T),
+            gpt = mean(gpt_match, na.rm = T),
+            both = mean(both_match, na.rm = T))
+
+#combine dataframes
+accuracy_combined <- bind_rows(accuracy_overall, accuracy_type)
+print(accuracy_combined)
+```
+
+## Display run time for different models
+```{r}
+test_set_classified %>%
+  select(starts_with('time')) %>% #keep only time variables
+  pivot_longer(cols = everything(), names_to = 'model', values_to = 'time') %>% #pivot longer
+  ggplot(aes(x = time))+ # display time histograms faceted by model type
+    geom_histogram()+
+    facet_wrap(.~model, ncol = 1)
+```
+
+## Takeaways
+* Accuracy: 54% for LLama3 vs 53% for GPT 3.5. That's not great!
+  + Ensemble agreement of only 39.6%. You could use multiple models and hand label cases where there is disagreement between models.
+  + Key challenge: When we looked at the LLM classifications, we often felt that its classifications were better than ours. Without a reliable groundtruth, it's hard to evaluate error rates.
+* Subgroup performance: Both models performed much better for mitigating than aggravating circumstances. This could be because there are fewer unique mitigating circumstances, because distinguishing between them is easier, or because the LLMs 'know' more about mitigating than aggravating circumstances. It's not a huge concern in this context but when dealing e.g. with different vulnerable subgroups, it could lead to systematic bias in your analysis.
+* Time: Locally run Llama3 significantly slower than OpenAI API for GPT 3.5. But there are ways to speed up the process, check out https://cheatsheet.md/llm-leaderboard/ollama
+* Privacy: Using locally run LLMs doesn't send any data to big bad companies. Also, if you work with sensitive data, running LLMs locally minimizes the chance of data leakage.
+* Price: OpenAI's API isn't free. But honestly, it's not that expensive either: running classifications for these 150 odd paragrapgs cost about 5 cents. 
+
+
